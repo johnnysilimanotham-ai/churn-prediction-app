@@ -401,13 +401,16 @@ elif page == "🧹 Data Cleaning":
                         st.session_state.selected_columns.append(col)
                     elif not is_selected and col in st.session_state.selected_columns:
                         st.session_state.selected_columns.remove(col)
-                    
-                    # Show data type (using preview to reflect binary->categorical) and missing count
-                    series_preview = df_preview[col]
-                    if pd.api.types.is_numeric_dtype(series_preview) and not pd.api.types.is_categorical_dtype(series_preview):
-                        dtype_label = "🔢 Numeric"
+                        
+        # Display target as categorical in the UI if it's binary, but keep it numeric for modeling
+                    if col == target_col and _looks_like_binary(df[col]):
+                        dtype_label = "📝 Categorical (binary 0/1 target)"
                     else:
-                        dtype_label = "📝 Categorical"
+                        series_preview = df_preview[col]
+                        if pd.api.types.is_categorical_dtype(series_preview) or not pd.api.types.is_numeric_dtype(series_preview):
+                            dtype_label = "📝 Categorical"
+                        else:
+                            dtype_label = "🔢 Numeric"
                     
                     missing_count = df[col].isnull().sum()
                     missing_pct = (missing_count / len(df)) * 100 if len(df) else 0
