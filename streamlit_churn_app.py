@@ -272,7 +272,7 @@ if page == "📤 Upload Data":
             st.error(f"Error loading file: {str(e)}")
 
 # ==================== PAGE 2: DATA CLEANING ====================
-# ==================== PAGE 2: DATA CLEANING ====================
+
 elif page == "🧹 Data Cleaning":
     st.header("🧹 Data Cleaning & Preparation")
     
