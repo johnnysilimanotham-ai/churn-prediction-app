@@ -3,6 +3,7 @@ Customer Churn Prediction App - Streamlit Cloud Compatible
 Save this as: streamlit_churn_app.py
 """
 
+import re
 import io
 import json
 import pickle
@@ -71,6 +72,42 @@ if 'feature_schema' not in st.session_state:
 
 # ==================== HELPER FUNCTIONS ====================
 
+BINARY_FEATURE_NAMES_RE = re.compile(
+    r'^(credit[_\s]?card|active[_\s]?member|has[_\s]?cr[_\s]?card)$',
+    flags=re.IGNORECASE
+)
+
+def _looks_like_binary(s: pd.Series) -> bool:
+    s = s.dropna()
+    if s.empty:
+        return False
+    if pd.api.types.is_numeric_dtype(s):
+        vals = set(pd.unique(pd.to_numeric(s, errors='coerce')))
+        return vals.issubset({0, 1})
+    vals = set(s.astype(str).str.strip().str.lower().unique())
+    return vals.issubset({'0','1','yes','no','true','false','y','n'})
+
+def coerce_binary_features(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
+    """
+    Convert binary *feature* columns to categorical ('No','Yes') so your
+    ColumnTransformer treats them as categorical. Never changes the target.
+    """
+    out = df.copy()
+    for c in out.columns:
+        if c == target_col:
+            continue
+        if BINARY_FEATURE_NAMES_RE.search(c) or _looks_like_binary(out[c]):
+            s = out[c]
+            if pd.api.types.is_numeric_dtype(s):
+                s = pd.to_numeric(s, errors='coerce').map({0: 'No', 1: 'Yes'})
+            else:
+                s = s.astype(str).str.strip().str.lower().map({
+                    '0':'No','no':'No','false':'No','n':'No',
+                    '1':'Yes','yes':'Yes','true':'Yes','y':'Yes'
+                })
+            out[c] = pd.Categorical(s, categories=['No','Yes'])
+    return out
+
 def normalize_target(df, target_col):
     """Normalize target to 0/1 format"""
     if target_col not in df.columns:
@@ -115,6 +152,9 @@ def clean_data(df, target_col):
     
     # Drop duplicates
     df = df.drop_duplicates()
+
+    # **Coerce binary features to categorical so the encoder sees them**
+    df = coerce_binary_features(df, target_col)
     
     # Verify we have both classes
     unique_classes = df[target_col].unique()
@@ -125,6 +165,8 @@ def clean_data(df, target_col):
 
 def build_preprocessor(df, target_col):
     """Build preprocessing pipeline"""
+    df = coerce_binary_features(df, target_col)
+
     feature_cols = [c for c in df.columns if c != target_col]
     X = df[feature_cols]
     num_cols = X.select_dtypes(include=[np.number]).columns.tolist()
@@ -273,7 +315,6 @@ if page == "📤 Upload Data":
 
 # ==================== PAGE 2: DATA CLEANING ====================
 
-# ==================== PAGE 2: DATA CLEANING ====================
 elif page == "🧹 Data Cleaning":
     st.header("🧹 Data Cleaning & Preparation")
     
@@ -300,10 +341,12 @@ elif page == "🧹 Data Cleaning":
         
         # Target Column Selection
         st.subheader("🎯 Target Column Selection")
+        lower_cols = [c.lower() for c in df.columns]
+        default_target_idx = lower_cols.index('churn') if 'churn' in lower_cols else 0
         target_col = st.selectbox(
             "Select Target Column (Churn/Outcome)",
             options=df.columns.tolist(),
-            index=len(df.columns)-1 if 'churn' in df.columns.str.lower().tolist() else 0,
+            index=default_target_idx,
             help="Select the column you want to predict"
         )
         
@@ -316,22 +359,30 @@ elif page == "🧹 Data Cleaning":
         if 'selected_columns' not in st.session_state:
             st.session_state.selected_columns = df.columns.tolist()
         
-        col1, col2 = st.columns([3, 1])
-        with col1:
+        ctop1, ctop2 = st.columns([3, 1])
+        with ctop1:
             st.markdown("Choose which columns to include in cleaning operations")
-        with col2:
+        with ctop2:
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
                 if st.button("Select All", key="select_all", use_container_width=True):
                     st.session_state.selected_columns = df.columns.tolist()
+                    # sync checkbox states
+                    for c in df.columns:
+                        st.session_state[f"col_check_{c}"] = True
                     st.rerun()
             with col_btn2:
                 if st.button("Clear All", key="clear_all", use_container_width=True):
                     st.session_state.selected_columns = []
+                    # sync checkbox states
+                    for c in df.columns:
+                        st.session_state[f"col_check_{c}"] = False
                     st.rerun()
         
         # Display columns with data type and missing info
         st.markdown("##### Available Columns")
+        # Show binary-looking feature cols as categorical in the UI (target remains numeric)
+        df_preview = coerce_binary_features(df, target_col=target_col)
         
         for col in df.columns:
             col_container = st.container()
@@ -339,9 +390,10 @@ elif page == "🧹 Data Cleaning":
                 col_checkbox, col_info = st.columns([3, 1])
                 
                 with col_checkbox:
+                    default_checked = st.session_state.get(f"col_check_{col}", col in st.session_state.selected_columns)
                     is_selected = st.checkbox(
                         col,
-                        value=col in st.session_state.selected_columns,
+                        value=default_checked,
                         key=f"col_check_{col}"
                     )
                     
@@ -350,19 +402,15 @@ elif page == "🧹 Data Cleaning":
                     elif not is_selected and col in st.session_state.selected_columns:
                         st.session_state.selected_columns.remove(col)
                     
-                    # Show data type and missing count
-                    dtype = df[col].dtype
-                    missing_count = df[col].isnull().sum()
-                    missing_pct = (missing_count / len(df)) * 100
-                    
-                    # Determine if numeric or categorical
-                    if pd.api.types.is_numeric_dtype(df[col]):
+                    # Show data type (using preview to reflect binary->categorical) and missing count
+                    series_preview = df_preview[col]
+                    if pd.api.types.is_numeric_dtype(series_preview) and not pd.api.types.is_categorical_dtype(series_preview):
                         dtype_label = "🔢 Numeric"
-                        dtype_color = "blue"
                     else:
                         dtype_label = "📝 Categorical"
-                        dtype_color = "green"
                     
+                    missing_count = df[col].isnull().sum()
+                    missing_pct = (missing_count / len(df)) * 100 if len(df) else 0
                     info_text = f"{dtype_label}"
                     if missing_count > 0:
                         info_text += f" | ⚠️ {missing_count} missing ({missing_pct:.1f}%)"
@@ -437,10 +485,10 @@ elif page == "🧹 Data Cleaning":
             if encode_categorical:
                 encoding_method = st.selectbox(
                     "Encoding Method",
-                    options=['onehot', 'label', 'ordinal'],
-                    index=['onehot', 'label', 'ordinal'].index(
+                    options=['onehot', 'label'],  # removed 'ordinal' for cleanliness
+                    index=['onehot', 'label'].index(
                         st.session_state.cleaning_options['encoding_method']
-                    ),
+                    ) if st.session_state.cleaning_options['encoding_method'] in ['onehot','label'] else 0,
                     help="Choose encoding strategy"
                 )
                 st.session_state.cleaning_options['encoding_method'] = encoding_method
@@ -448,8 +496,7 @@ elif page == "🧹 Data Cleaning":
                 # Show explanation
                 encoding_explanations = {
                     'onehot': "Create binary columns for each category (recommended for ML)",
-                    'label': "Assign integer to each category (0, 1, 2, ...)",
-                    'ordinal': "Assign ordered integers (for ranked categories)"
+                    'label': "Assign integer to each category (0, 1, 2, ...)"
                 }
                 st.caption(f"ℹ️ {encoding_explanations[encoding_method]}")
         
@@ -496,17 +543,21 @@ elif page == "🧹 Data Cleaning":
         if st.button("🚀 Apply Cleaning Operations", type="primary", use_container_width=True):
             try:
                 with st.spinner("Cleaning data... Please wait."):
-                    # Filter to selected columns + target
+                    # Filter to selected columns + ensure target included
                     cols_to_process = [c for c in st.session_state.selected_columns if c != target_col]
                     if target_col not in st.session_state.selected_columns:
                         cols_to_process.append(target_col)
                     
                     df_clean = df[cols_to_process].copy()
-                    
+
+                    # Make target numeric 0/1; coerce binary features to categorical ('No','Yes')
+                    df_clean = normalize_target(df_clean, target_col)
+                    df_clean = coerce_binary_features(df_clean, target_col)
+
                     # Show original stats
                     st.info(f"📊 Original data: {len(df_clean)} rows, {len(df_clean.columns)} columns")
                     if target_col in df_clean.columns:
-                        st.info(f"📊 Original '{target_col}' distribution: {df_clean[target_col].value_counts().to_dict()}")
+                        st.info(f"📊 Original '{target_col}' distribution: {df_clean[target_col].value_counts(dropna=False).to_dict()}")
                     
                     progress_bar = st.progress(0)
                     status_text = st.empty()
@@ -531,21 +582,20 @@ elif page == "🧹 Data Cleaning":
                         else:
                             for col in df_clean.columns:
                                 if df_clean[col].isnull().any():
-                                    if pd.api.types.is_numeric_dtype(df_clean[col]):
+                                    if pd.api.types.is_numeric_dtype(df_clean[col]) and col != target_col:
                                         if method == 'mean':
-                                            df_clean[col].fillna(df_clean[col].mean(), inplace=True)
+                                            df_clean[col] = df_clean[col].fillna(df_clean[col].mean())
                                         elif method == 'median':
-                                            df_clean[col].fillna(df_clean[col].median(), inplace=True)
+                                            df_clean[col] = df_clean[col].fillna(df_clean[col].median())
                                         elif method == 'mode':
-                                            df_clean[col].fillna(df_clean[col].mode()[0], inplace=True)
+                                            df_clean[col] = df_clean[col].fillna(df_clean[col].mode().iloc[0])
                                     else:
                                         if method == 'mode':
-                                            df_clean[col].fillna(df_clean[col].mode()[0], inplace=True)
-                                    
-                                    if method == 'forward_fill':
-                                        df_clean[col].fillna(method='ffill', inplace=True)
-                                    elif method == 'backward_fill':
-                                        df_clean[col].fillna(method='bfill', inplace=True)
+                                            df_clean[col] = df_clean[col].fillna(df_clean[col].mode().iloc[0])
+                                        elif method == 'forward_fill':
+                                            df_clean[col] = df_clean[col].fillna(method='ffill')
+                                        elif method == 'backward_fill':
+                                            df_clean[col] = df_clean[col].fillna(method='bfill')
                             
                             st.success(f"✅ Filled missing values using {method} method")
                     progress_bar.progress(40)
@@ -555,22 +605,21 @@ elif page == "🧹 Data Cleaning":
                         status_text.text("Removing outliers...")
                         before_out = len(df_clean)
                         
-                        numeric_cols = df_clean.select_dtypes(include=[np.number]).columns
+                        numeric_cols = [c for c in df_clean.select_dtypes(include=[np.number]).columns if c != target_col]
                         for col in numeric_cols:
-                            if col != target_col:
-                                Q1 = df_clean[col].quantile(0.25)
-                                Q3 = df_clean[col].quantile(0.75)
-                                IQR = Q3 - Q1
-                                lower_bound = Q1 - 1.5 * IQR
-                                upper_bound = Q3 + 1.5 * IQR
-                                df_clean = df_clean[
-                                    (df_clean[col] >= lower_bound) & (df_clean[col] <= upper_bound)
-                                ]
+                            Q1 = df_clean[col].quantile(0.25)
+                            Q3 = df_clean[col].quantile(0.75)
+                            IQR = Q3 - Q1
+                            lower_bound = Q1 - 1.5 * IQR
+                            upper_bound = Q3 + 1.5 * IQR
+                            df_clean = df_clean[
+                                (df_clean[col] >= lower_bound) & (df_clean[col] <= upper_bound)
+                            ]
                         
                         st.success(f"✅ Removed {before_out - len(df_clean)} outlier rows")
                     progress_bar.progress(60)
                     
-                    # 4. Normalize Target Column
+                    # 4. Normalize Target Column (no-op if already 0/1)
                     status_text.text("Normalizing target column...")
                     df_clean = normalize_target(df_clean, target_col)
                     progress_bar.progress(70)
@@ -580,7 +629,8 @@ elif page == "🧹 Data Cleaning":
                         status_text.text("Encoding categorical variables...")
                         method = st.session_state.cleaning_options['encoding_method']
                         
-                        cat_cols = df_clean.select_dtypes(include=['object']).columns
+                        # include 'category' so binary features get encoded
+                        cat_cols = list(df_clean.select_dtypes(include=['object', 'category']).columns)
                         cat_cols = [c for c in cat_cols if c != target_col]
                         
                         if method == 'onehot':
@@ -588,8 +638,8 @@ elif page == "🧹 Data Cleaning":
                             st.success(f"✅ One-hot encoded {len(cat_cols)} categorical columns")
                         elif method == 'label':
                             from sklearn.preprocessing import LabelEncoder
-                            le = LabelEncoder()
                             for col in cat_cols:
+                                le = LabelEncoder()
                                 df_clean[col] = le.fit_transform(df_clean[col].astype(str))
                             st.success(f"✅ Label encoded {len(cat_cols)} categorical columns")
                     progress_bar.progress(80)
@@ -599,8 +649,7 @@ elif page == "🧹 Data Cleaning":
                         status_text.text("Normalizing numeric features...")
                         from sklearn.preprocessing import MinMaxScaler
                         
-                        numeric_cols = df_clean.select_dtypes(include=[np.number]).columns
-                        numeric_cols = [c for c in numeric_cols if c != target_col]
+                        numeric_cols = [c for c in df_clean.select_dtypes(include=[np.number]).columns if c != target_col]
                         
                         if len(numeric_cols) > 0:
                             scaler = MinMaxScaler()
@@ -612,10 +661,10 @@ elif page == "🧹 Data Cleaning":
                     status_text.text("Validating cleaned data...")
                     
                     # Verify we have both classes in target
-                    unique_classes = df_clean[target_col].unique()
-                    if len(unique_classes) < 2:
+                    unique_classes = pd.Series(df_clean[target_col].dropna().unique())
+                    if unique_classes.nunique() < 2:
                         raise ValueError(
-                            f"After cleaning, target column only has {len(unique_classes)} class(es): {unique_classes}. "
+                            f"After cleaning, target column only has {unique_classes.nunique()} class(es): {unique_classes.tolist()}. "
                             f"Need at least 2 classes for prediction."
                         )
                     
@@ -630,7 +679,7 @@ elif page == "🧹 Data Cleaning":
                     st.success("✅ Data cleaned successfully!")
                     
                     # Show cleaned target distribution
-                    st.info(f"📊 Cleaned '{target_col}' distribution: {df_clean[target_col].value_counts().to_dict()}")
+                    st.info(f"📊 Cleaned '{target_col}' distribution: {df_clean[target_col].value_counts(dropna=False).to_dict()}")
                 
             except ValueError as e:
                 st.error(f"❌ Error: {str(e)}")
@@ -639,9 +688,10 @@ elif page == "🧹 Data Cleaning":
                 # Debug info
                 with st.expander("🔍 Debug Information"):
                     st.write(f"Target column: {target_col}")
-                    st.write(f"Unique values in target: {df_clean[target_col].unique()}")
-                    st.write(f"Value counts: {df_clean[target_col].value_counts()}")
-                    st.write(f"Data type: {df_clean[target_col].dtype}")
+                    if 'df_clean' in locals() and target_col in df_clean.columns:
+                        st.write(f"Unique values in target: {pd.Series(df_clean[target_col].unique()).tolist()}")
+                        st.write(f"Value counts: {df_clean[target_col].value_counts(dropna=False)}")
+                        st.write(f"Data type: {df_clean[target_col].dtype}")
                 st.stop()
             
             except Exception as e:
@@ -655,25 +705,25 @@ elif page == "🧹 Data Cleaning":
             col1, col2 = st.columns(2)
             with col1:
                 st.metric("Rows Before", len(df))
-                st.metric("Rows After", len(df_clean))
-                st.metric("Rows Removed", len(df) - len(df_clean))
+                st.metric("Rows After", len(st.session_state.df_clean))
+                st.metric("Rows Removed", len(df) - len(st.session_state.df_clean))
             with col2:
                 st.metric("Columns Before", len(df.columns))
-                st.metric("Columns After", len(df_clean.columns))
-                st.metric("Missing Values", int(df_clean.isnull().sum().sum()))
+                st.metric("Columns After", len(st.session_state.df_clean.columns))
+                st.metric("Missing Values", int(st.session_state.df_clean.isnull().sum().sum()))
             
             st.subheader("📊 Cleaned Data Preview")
-            st.dataframe(df_clean.head(20), use_container_width=True)
+            st.dataframe(st.session_state.df_clean.head(20), use_container_width=True)
             
             # Target Distribution Visualization
-            if target_col in df_clean.columns:
+            if target_col in st.session_state.df_clean.columns:
                 st.subheader("🎯 Target Distribution")
-                churn_counts = df_clean[target_col].dropna().value_counts().sort_index()
+                churn_counts = st.session_state.df_clean[target_col].dropna().value_counts().sort_index()
                 
                 if len(churn_counts) > 0:
-                    col1, col2 = st.columns([2, 1])
+                    vcol1, vcol2 = st.columns([2, 1])
                     
-                    with col1:
+                    with vcol1:
                         labels = ['No Churn' if i == 0 else 'Churn' for i in churn_counts.index]
                         fig = px.pie(
                             values=churn_counts.values,
@@ -683,7 +733,7 @@ elif page == "🧹 Data Cleaning":
                         )
                         st.plotly_chart(fig, use_container_width=True)
                     
-                    with col2:
+                    with vcol2:
                         st.metric("No Churn", int(churn_counts.get(0, 0)))
                         st.metric("Churn", int(churn_counts.get(1, 0)))
                         
