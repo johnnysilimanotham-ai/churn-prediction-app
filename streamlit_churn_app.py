@@ -749,36 +749,156 @@ elif page == "🧹 Data Cleaning":
 # ==================== PAGE 3: TRAIN MODELS ====================
 elif page == "🤖 Train Models":
     st.header("🤖 Train Machine Learning Models")
-    
+
     if st.session_state.df_clean is None:
         st.warning("⚠️ Please clean your data first!")
     else:
-        df_clean = st.session_state.df_clean
+        import numpy as np
+        import pandas as pd
+        from sklearn.model_selection import train_test_split
+        from sklearn.pipeline import Pipeline
+        from sklearn.metrics import (
+            accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+        )
+        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.svm import SVC
+        from sklearn.linear_model import LogisticRegression
+
+        df_clean = st.session_state.df_clean.copy()
         target_col = st.session_state.target_col
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            test_size = st.slider("Test Set Size (%)", 10, 40, 20) / 100
-        with col2:
-            st.metric("Training Samples", int(len(df_clean) * (1 - test_size)))
-        
-        if st.button("🚀 Train All Models", type="primary"):
-            with st.spinner("Training models... This may take a minute."):
-                try:
-                    results, models, schema, X_test = train_models(df_clean, target_col, test_size)
-                    
-                    st.session_state.results = results
-                    st.session_state.models = models
-                    st.session_state.feature_schema = schema
+
+        # --- Config UI ---
+        st.subheader("⚙️ Training Configuration")
+
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            model_choice = st.radio(
+                "Select Algorithm",
+                options=["random-forest", "svm", "logistic-regression"],
+                index=0,
+                horizontal=True
+            )
+        with c2:
+            train_pct = st.slider("Training %", min_value=50, max_value=90, step=5, value=80)
+            test_size = 1 - (train_pct / 100)
+
+        # --- NEW: dataset sampling control ---
+        st.subheader("📉 Dataset Sampling")
+        sample_option = st.radio(
+            "Select how much data to use:",
+            ["Use all data", "Use a percentage", "Use a fixed number of rows"],
+            index=0
+        )
+
+        df_to_use = df_clean.copy()
+        if sample_option == "Use a percentage":
+            perc = st.slider("Percentage of dataset to use", 10, 100, 100, step=10)
+            df_to_use = df_clean.sample(frac=perc/100, random_state=42)
+            st.caption(f"Using {perc}% → {len(df_to_use):,} rows out of {len(df_clean):,}")
+        elif sample_option == "Use a fixed number of rows":
+            max_rows = len(df_clean)
+            n_rows = st.number_input("Number of rows to use", min_value=100, max_value=max_rows, value=max_rows, step=100)
+            df_to_use = df_clean.sample(n=int(n_rows), random_state=42)
+            st.caption(f"Using {len(df_to_use):,} rows out of {len(df_clean):,}")
+
+        # Show info
+        st.caption(f"Final dataset for training/testing: {len(df_to_use):,} rows • {df_to_use.shape[1]} columns")
+
+        # --- Map model choice ---
+        def make_estimator(key: str):
+            if key == "random-forest":
+                return RandomForestClassifier(
+                    n_estimators=300,
+                    random_state=42,
+                    n_jobs=-1
+                )
+            if key == "svm":
+                return SVC(kernel="rbf", probability=True, random_state=42)
+            if key == "logistic-regression":
+                return LogisticRegression(max_iter=1000, solver="lbfgs")
+            raise ValueError(f"Unknown model '{key}'")
+
+        if st.button("🚀 Start Training", type="primary", use_container_width=True):
+            try:
+                with st.spinner("Training in progress…"):
+                    prog = st.progress(0)
+                    status = st.empty()
+
+                    # Normalize & coerce binary features
+                    status.text("Preparing data…")
+                    df_to_use = normalize_target(df_to_use, target_col)
+                    df_to_use = coerce_binary_features(df_to_use, target_col)
+
+                    y = df_to_use[target_col].astype(int)
+                    X = df_to_use.drop(columns=[target_col])
+
+                    if y.nunique() < 2:
+                        st.error("❌ Target column only has one class. Cannot train.")
+                        st.stop()
+                    prog.progress(20)
+
+                    status.text("Building preprocessing pipeline…")
+                    preprocessor, schema = build_preprocessor(df_to_use, target_col)
+                    prog.progress(40)
+
+                    status.text("Splitting train/test…")
+                    X_train, X_test, y_train, y_test = train_test_split(
+                        X, y, test_size=test_size, random_state=42, stratify=y
+                    )
+                    prog.progress(60)
+
+                    status.text("Training model…")
+                    estimator = make_estimator(model_choice)
+                    pipe = Pipeline([("prep", preprocessor), ("model", estimator)])
+                    pipe.fit(X_train, y_train)
+                    prog.progress(85)
+
+                    status.text("Evaluating model…")
+                    y_pred = pipe.predict(X_test)
+                    y_proba = None
+                    if hasattr(pipe.named_steps["model"], "predict_proba"):
+                        try:
+                            y_proba = pipe.predict_proba(X_test)[:, 1]
+                        except Exception:
+                            y_proba = None
+
+                    metrics = {
+                        "accuracy": accuracy_score(y_test, y_pred),
+                        "precision": precision_score(y_test, y_pred, zero_division=0),
+                        "recall": recall_score(y_test, y_pred, zero_division=0),
+                        "f1": f1_score(y_test, y_pred, zero_division=0),
+                        "roc_auc": roc_auc_score(y_test, y_proba) if y_proba is not None else None
+                    }
+                    prog.progress(100)
+                    status.empty()
+
+                    # Save for later use
+                    st.session_state.trained_pipeline = pipe
+                    st.session_state.trained_model_key = model_choice
+                    st.session_state.train_schema = schema
                     st.session_state.X_test = X_test
-                    
-                    st.success("✅ All models trained successfully!")
+                    st.session_state.y_test = y_test
+                    st.session_state.y_pred = y_pred
+                    st.session_state.y_proba = y_proba
+                    st.session_state.metrics = metrics
+
+                    st.success("✅ Training complete!")
                     st.balloons()
-                    
-                    st.subheader("📊 Training Results")
-                    st.dataframe(results.style.highlight_max(axis=0, color='lightgreen'), use_container_width=True)
-                except Exception as e:
-                    st.error(f"Error training models: {str(e)}")
+
+                    st.subheader("📊 Model Performance")
+                    m = metrics
+                    colA, colB = st.columns(2)
+                    with colA:
+                        st.metric("Accuracy", f"{m['accuracy']*100:,.1f}%")
+                        st.metric("Recall", f"{m['recall']*100:,.1f}%")
+                    with colB:
+                        st.metric("Precision", f"{m['precision']*100:,.1f}%")
+                        st.metric("F1 Score", f"{m['f1']*100:,.1f}%")
+                    if m["roc_auc"] is not None:
+                        st.metric("ROC AUC", f"{m['roc_auc']*100:,.1f}%")
+
+            except Exception as e:
+                st.error(f"Error training model: {e}")
 
 # ==================== PAGE 4: MODEL COMPARISON ====================
 elif page == "📊 Model Comparison":
