@@ -768,7 +768,6 @@ elif page == "🤖 Train Models":
         target_col = st.session_state.target_col
 
         # --- Configuration UI ---
-        st.subheader("⚙️ Training Configuration")
 
         c1, c2 = st.columns([2, 1])
         with c1:
