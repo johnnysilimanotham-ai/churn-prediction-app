@@ -404,7 +404,7 @@ elif page == "🧹 Data Cleaning":
                         
         # Display target as categorical in the UI if it's binary, but keep it numeric for modeling
                     if col == target_col and _looks_like_binary(df[col]):
-                        dtype_label = "📝 Categorical (binary 0/1 target)"
+                        dtype_label = "📝 Categorical"
                     else:
                         series_preview = df_preview[col]
                         if pd.api.types.is_categorical_dtype(series_preview) or not pd.api.types.is_numeric_dtype(series_preview):
