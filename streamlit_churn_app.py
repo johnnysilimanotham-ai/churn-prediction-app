@@ -273,6 +273,7 @@ if page == "📤 Upload Data":
 
 # ==================== PAGE 2: DATA CLEANING ====================
 
+# ==================== PAGE 2: DATA CLEANING ====================
 elif page == "🧹 Data Cleaning":
     st.header("🧹 Data Cleaning & Preparation")
     
@@ -311,18 +312,23 @@ elif page == "🧹 Data Cleaning":
         # Column Selection for Cleaning
         st.subheader("📋 Select Columns to Clean")
         
+        # Initialize selected columns in session state
+        if 'selected_columns' not in st.session_state:
+            st.session_state.selected_columns = df.columns.tolist()
+        
         col1, col2 = st.columns([3, 1])
         with col1:
             st.markdown("Choose which columns to include in cleaning operations")
         with col2:
-            if st.button("Select All", key="select_all"):
-                st.session_state.selected_columns = df.columns.tolist()
-            if st.button("Clear All", key="clear_all"):
-                st.session_state.selected_columns = []
-        
-        # Initialize selected columns in session state
-        if 'selected_columns' not in st.session_state:
-            st.session_state.selected_columns = df.columns.tolist()
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.button("Select All", key="select_all", use_container_width=True):
+                    st.session_state.selected_columns = df.columns.tolist()
+                    st.rerun()
+            with col_btn2:
+                if st.button("Clear All", key="clear_all", use_container_width=True):
+                    st.session_state.selected_columns = []
+                    st.rerun()
         
         # Display columns with data type and missing info
         st.markdown("##### Available Columns")
