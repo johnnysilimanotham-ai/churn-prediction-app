@@ -767,48 +767,52 @@ elif page == "🤖 Train Models":
         df_clean = st.session_state.df_clean.copy()
         target_col = st.session_state.target_col
 
-        # --- Config UI ---
+        # --- Configuration UI ---
         st.subheader("⚙️ Training Configuration")
 
         c1, c2 = st.columns([2, 1])
         with c1:
-            model_choice = st.radio(
-                "Select Algorithm",
+            selected_models = st.multiselect(
+                "Select Algorithms to Train",
                 options=["random-forest", "svm", "logistic-regression"],
-                index=0,
-                horizontal=True
+                default=["random-forest", "svm", "logistic-regression"]
             )
         with c2:
             train_pct = st.slider("Training %", min_value=50, max_value=90, step=5, value=80)
             test_size = 1 - (train_pct / 100)
 
-        # --- NEW: dataset sampling control ---
         st.subheader("📉 Dataset Sampling")
         sample_option = st.radio(
-            "Select how much data to use:",
+            "How much data to use:",
             ["Use all data", "Use a percentage", "Use a fixed number of rows"],
             index=0
         )
 
-        df_to_use = df_clean.copy()
+        # Sampling control
+        df_to_use = df_clean
         if sample_option == "Use a percentage":
             perc = st.slider("Percentage of dataset to use", 10, 100, 100, step=10)
-            df_to_use = df_clean.sample(frac=perc/100, random_state=42)
+            if perc < 100:
+                df_to_use = df_clean.sample(frac=perc/100, random_state=42)
             st.caption(f"Using {perc}% → {len(df_to_use):,} rows out of {len(df_clean):,}")
         elif sample_option == "Use a fixed number of rows":
             max_rows = len(df_clean)
-            n_rows = st.number_input("Number of rows to use", min_value=100, max_value=max_rows, value=max_rows, step=100)
-            df_to_use = df_clean.sample(n=int(n_rows), random_state=42)
+            n_rows = st.number_input(
+                "Number of rows to use",
+                min_value=1, max_value=max_rows, value=max_rows, step=max(1, max_rows // 20)
+            )
+            if n_rows < max_rows:
+                df_to_use = df_clean.sample(n=int(n_rows), random_state=42)
             st.caption(f"Using {len(df_to_use):,} rows out of {len(df_clean):,}")
 
-        # Show info
-        st.caption(f"Final dataset for training/testing: {len(df_to_use):,} rows • {df_to_use.shape[1]} columns")
+        st.caption(f"Final dataset for train/test: {len(df_to_use):,} rows • {df_to_use.shape[1]} columns • Test set: {int(test_size*100)}%")
 
-        # --- Map model choice ---
+        # Map selection to estimators
         def make_estimator(key: str):
             if key == "random-forest":
                 return RandomForestClassifier(
                     n_estimators=300,
+                    max_depth=None,
                     random_state=42,
                     n_jobs=-1
                 )
@@ -818,87 +822,129 @@ elif page == "🤖 Train Models":
                 return LogisticRegression(max_iter=1000, solver="lbfgs")
             raise ValueError(f"Unknown model '{key}'")
 
+        # Start training
         if st.button("🚀 Start Training", type="primary", use_container_width=True):
-            try:
-                with st.spinner("Training in progress…"):
-                    prog = st.progress(0)
-                    status = st.empty()
+            if not selected_models:
+                st.error("Please select at least one algorithm.")
+            else:
+                try:
+                    with st.spinner("Training in progress…"):
+                        prog = st.progress(0)
+                        status = st.empty()
 
-                    # Normalize & coerce binary features
-                    status.text("Preparing data…")
-                    df_to_use = normalize_target(df_to_use, target_col)
-                    df_to_use = coerce_binary_features(df_to_use, target_col)
+                        # 0) Prep target & features (consistent with your cleaning)
+                        status.text("Preparing data…")
+                        df_to_use = normalize_target(df_to_use.copy(), target_col)
+                        df_to_use = coerce_binary_features(df_to_use, target_col)
 
-                    y = df_to_use[target_col].astype(int)
-                    X = df_to_use.drop(columns=[target_col])
+                        y = df_to_use[target_col].astype(int)
+                        X = df_to_use.drop(columns=[target_col])
 
-                    if y.nunique() < 2:
-                        st.error("❌ Target column only has one class. Cannot train.")
-                        st.stop()
-                    prog.progress(20)
+                        if y.nunique() < 2:
+                            st.error("❌ Target column only has one class after sampling. Cannot train.")
+                            st.stop()
 
-                    status.text("Building preprocessing pipeline…")
-                    preprocessor, schema = build_preprocessor(df_to_use, target_col)
-                    prog.progress(40)
+                        prog.progress(10)
 
-                    status.text("Splitting train/test…")
-                    X_train, X_test, y_train, y_test = train_test_split(
-                        X, y, test_size=test_size, random_state=42, stratify=y
-                    )
-                    prog.progress(60)
+                        # 1) Build preprocessor once; reuse for all models
+                        status.text("Building preprocessing pipeline…")
+                        preprocessor, schema = build_preprocessor(df_to_use, target_col)
+                        prog.progress(25)
 
-                    status.text("Training model…")
-                    estimator = make_estimator(model_choice)
-                    pipe = Pipeline([("prep", preprocessor), ("model", estimator)])
-                    pipe.fit(X_train, y_train)
-                    prog.progress(85)
+                        # 2) Split
+                        status.text("Splitting train/test…")
+                        X_train, X_test, y_train, y_test = train_test_split(
+                            X, y, test_size=test_size, random_state=42, stratify=y
+                        )
+                        prog.progress(40)
 
-                    status.text("Evaluating model…")
-                    y_pred = pipe.predict(X_test)
-                    y_proba = None
-                    if hasattr(pipe.named_steps["model"], "predict_proba"):
-                        try:
-                            y_proba = pipe.predict_proba(X_test)[:, 1]
-                        except Exception:
+                        # 3) Train each selected model
+                        results = []
+                        trained_models = {}
+                        n = len(selected_models)
+                        # Progress budget from 40 -> 100 across models
+                        for i, key in enumerate(selected_models, start=1):
+                            status.text(f"Training {key.replace('-', ' ').title()}…")
+                            estimator = make_estimator(key)
+                            pipe = Pipeline([("prep", preprocessor), ("model", estimator)])
+                            pipe.fit(X_train, y_train)
+
+                            y_pred = pipe.predict(X_test)
                             y_proba = None
+                            if hasattr(pipe.named_steps["model"], "predict_proba"):
+                                try:
+                                    y_proba = pipe.predict_proba(X_test)[:, 1]
+                                except Exception:
+                                    y_proba = None
 
-                    metrics = {
-                        "accuracy": accuracy_score(y_test, y_pred),
-                        "precision": precision_score(y_test, y_pred, zero_division=0),
-                        "recall": recall_score(y_test, y_pred, zero_division=0),
-                        "f1": f1_score(y_test, y_pred, zero_division=0),
-                        "roc_auc": roc_auc_score(y_test, y_proba) if y_proba is not None else None
-                    }
-                    prog.progress(100)
-                    status.empty()
+                            m = {
+                                "model": key,
+                                "accuracy": accuracy_score(y_test, y_pred),
+                                "precision": precision_score(y_test, y_pred, zero_division=0),
+                                "recall": recall_score(y_test, y_pred, zero_division=0),
+                                "f1": f1_score(y_test, y_pred, zero_division=0),
+                                "roc_auc": roc_auc_score(y_test, y_proba) if y_proba is not None else None
+                            }
+                            results.append(m)
+                            trained_models[key] = {
+                                "pipeline": pipe,
+                                "y_test": y_test,
+                                "y_pred": y_pred,
+                                "y_proba": y_proba
+                            }
 
-                    # Save for later use
-                    st.session_state.trained_pipeline = pipe
-                    st.session_state.trained_model_key = model_choice
-                    st.session_state.train_schema = schema
-                    st.session_state.X_test = X_test
-                    st.session_state.y_test = y_test
-                    st.session_state.y_pred = y_pred
-                    st.session_state.y_proba = y_proba
-                    st.session_state.metrics = metrics
+                            # Update progress proportionally
+                            base = 40
+                            end = 100
+                            prog.progress(base + int((end - base) * (i / n)))
 
-                    st.success("✅ Training complete!")
-                    st.balloons()
+                        status.empty()
 
-                    st.subheader("📊 Model Performance")
-                    m = metrics
-                    colA, colB = st.columns(2)
-                    with colA:
-                        st.metric("Accuracy", f"{m['accuracy']*100:,.1f}%")
-                        st.metric("Recall", f"{m['recall']*100:,.1f}%")
-                    with colB:
-                        st.metric("Precision", f"{m['precision']*100:,.1f}%")
-                        st.metric("F1 Score", f"{m['f1']*100:,.1f}%")
-                    if m["roc_auc"] is not None:
-                        st.metric("ROC AUC", f"{m['roc_auc']*100:,.1f}%")
+                        # 4) Persist to session for later use
+                        results_df = pd.DataFrame(results).set_index("model").sort_values("f1", ascending=False)
+                        st.session_state.results = results_df
+                        st.session_state.models = trained_models
+                        st.session_state.feature_schema = schema
+                        st.session_state.X_test = X_test
 
-            except Exception as e:
-                st.error(f"Error training model: {e}")
+                        st.success("✅ Training complete!")
+                        st.balloons()
+
+                        # 5) Show results
+                        st.subheader("📊 Training Results (Higher F1 is better)")
+                        st.dataframe(
+                            results_df.style.format({
+                                "accuracy": "{:.3f}",
+                                "precision": "{:.3f}",
+                                "recall": "{:.3f}",
+                                "f1": "{:.3f}",
+                                "roc_auc": (lambda x: "" if pd.isna(x) else f"{x:.3f}")
+                            }).highlight_max(axis=0, color="#E6FFED"),
+                            use_container_width=True
+                        )
+
+                        # Quick metric cards for the top model
+                        top_key = results_df.index[0]
+                        st.subheader(f"🏅 Best Model: {top_key.replace('-', ' ').title()}")
+                        top_row = results_df.loc[top_key]
+                        cA, cB = st.columns(2)
+                        with cA:
+                            st.metric("Accuracy", f"{top_row['accuracy']*100:,.1f}%")
+                            st.metric("Recall", f"{top_row['recall']*100:,.1f}%")
+                        with cB:
+                            st.metric("Precision", f"{top_row['precision']*100:,.1f}%")
+                            st.metric("F1 Score", f"{top_row['f1']*100:,.1f}%")
+                        if not pd.isna(top_row.get("roc_auc", np.nan)):
+                            st.metric("ROC AUC", f"{top_row['roc_auc']*100:,.1f}%")
+
+                        with st.expander("🔍 Feature Schema"):
+                            st.write({
+                                "numeric_features": schema.get("numeric_features", []),
+                                "categorical_features": schema.get("categorical_features", []),
+                            })
+
+                except Exception as e:
+                    st.error(f"Error training models: {e}")
 
 # ==================== PAGE 4: MODEL COMPARISON ====================
 elif page == "📊 Model Comparison":
