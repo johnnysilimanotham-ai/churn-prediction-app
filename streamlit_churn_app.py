@@ -777,7 +777,9 @@ elif page == "🤖 Train Models":
             default=[],
             placeholder="Choose options"
         )
-
+        
+        balance_classes = st.checkbox("Handle class imbalance (recommended)", value=True)
+        
         # Training % slider (placed BELOW model selection)
         train_pct = st.slider("Training %", min_value=50, max_value=90, step=5, value=80)
         test_size = 1 - (train_pct / 100)
@@ -814,12 +816,16 @@ elif page == "🤖 Train Models":
         # Map selection to estimators
         def make_estimator(key: str):
             if key == "random-forest":
-                return RandomForestClassifier(n_estimators=300, max_depth=None, random_state=42, n_jobs=-1)
+                return RandomForestClassifier(
+                n_estimators=300, max_depth=None, random_state=42, n_jobs=-1,
+                class_weight="balanced" if balance_classes else None
+                )
             if key == "svm":
-                return SVC(kernel="rbf", probability=True, random_state=42)
+                return SVC(kernel="rbf", probability=True, random_state=42,
+                   class_weight="balanced" if balance_classes else None)
             if key == "logistic-regression":
-                return LogisticRegression(max_iter=1000, solver="lbfgs")
-            raise ValueError(f"Unknown model '{key}'")
+                return LogisticRegression(max_iter=1000, solver="lbfgs",
+                    class_weight="balanced" if balance_classes else None)
 
         # Start training
         if st.button("🚀 Start Training", type="primary", use_container_width=True):
