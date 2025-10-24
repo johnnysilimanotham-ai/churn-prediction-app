@@ -768,17 +768,19 @@ elif page == "🤖 Train Models":
         target_col = st.session_state.target_col
 
         # --- Configuration UI ---
+        st.subheader("⚙️ Training Configuration")
 
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            selected_models = st.multiselect(
-                "Select Algorithms to Train",
-                options=["random-forest", "svm", "logistic-regression"],
-                default=["random-forest", "svm", "logistic-regression"]
-            )
-        with c2:
-            train_pct = st.slider("Training %", min_value=50, max_value=90, step=5, value=80)
-            test_size = 1 - (train_pct / 100)
+        # Model selection (no defaults; empty state)
+        selected_models = st.multiselect(
+            "Select Algorithms to Train",
+            options=["random-forest", "svm", "logistic-regression"],
+            default=[],
+            placeholder="Choose options"
+        )
+
+        # Training % slider (placed BELOW model selection)
+        train_pct = st.slider("Training %", min_value=50, max_value=90, step=5, value=80)
+        test_size = 1 - (train_pct / 100)
 
         st.subheader("📉 Dataset Sampling")
         sample_option = st.radio(
@@ -804,17 +806,15 @@ elif page == "🤖 Train Models":
                 df_to_use = df_clean.sample(n=int(n_rows), random_state=42)
             st.caption(f"Using {len(df_to_use):,} rows out of {len(df_clean):,}")
 
-        st.caption(f"Final dataset for train/test: {len(df_to_use):,} rows • {df_to_use.shape[1]} columns • Test set: {int(test_size*100)}%")
+        st.caption(
+            f"Final dataset for train/test: {len(df_to_use):,} rows • {df_to_use.shape[1]} columns • "
+            f"Test set: {int(test_size*100)}%"
+        )
 
         # Map selection to estimators
         def make_estimator(key: str):
             if key == "random-forest":
-                return RandomForestClassifier(
-                    n_estimators=300,
-                    max_depth=None,
-                    random_state=42,
-                    n_jobs=-1
-                )
+                return RandomForestClassifier(n_estimators=300, max_depth=None, random_state=42, n_jobs=-1)
             if key == "svm":
                 return SVC(kernel="rbf", probability=True, random_state=42)
             if key == "logistic-regression":
@@ -831,7 +831,7 @@ elif page == "🤖 Train Models":
                         prog = st.progress(0)
                         status = st.empty()
 
-                        # 0) Prep target & features (consistent with your cleaning)
+                        # 0) Prep target & features
                         status.text("Preparing data…")
                         df_to_use = normalize_target(df_to_use.copy(), target_col)
                         df_to_use = coerce_binary_features(df_to_use, target_col)
@@ -845,7 +845,7 @@ elif page == "🤖 Train Models":
 
                         prog.progress(10)
 
-                        # 1) Build preprocessor once; reuse for all models
+                        # 1) Build preprocessor once
                         status.text("Building preprocessing pipeline…")
                         preprocessor, schema = build_preprocessor(df_to_use, target_col)
                         prog.progress(25)
@@ -861,7 +861,6 @@ elif page == "🤖 Train Models":
                         results = []
                         trained_models = {}
                         n = len(selected_models)
-                        # Progress budget from 40 -> 100 across models
                         for i, key in enumerate(selected_models, start=1):
                             status.text(f"Training {key.replace('-', ' ').title()}…")
                             estimator = make_estimator(key)
@@ -892,14 +891,13 @@ elif page == "🤖 Train Models":
                                 "y_proba": y_proba
                             }
 
-                            # Update progress proportionally
-                            base = 40
-                            end = 100
+                            # Progress allocation across models
+                            base, end = 40, 100
                             prog.progress(base + int((end - base) * (i / n)))
 
                         status.empty()
 
-                        # 4) Persist to session for later use
+                        # 4) Persist & show results
                         results_df = pd.DataFrame(results).set_index("model").sort_values("f1", ascending=False)
                         st.session_state.results = results_df
                         st.session_state.models = trained_models
@@ -909,7 +907,6 @@ elif page == "🤖 Train Models":
                         st.success("✅ Training complete!")
                         st.balloons()
 
-                        # 5) Show results
                         st.subheader("📊 Training Results (Higher F1 is better)")
                         st.dataframe(
                             results_df.style.format({
@@ -922,19 +919,19 @@ elif page == "🤖 Train Models":
                             use_container_width=True
                         )
 
-                        # Quick metric cards for the top model
-                        top_key = results_df.index[0]
-                        st.subheader(f"🏅 Best Model: {top_key.replace('-', ' ').title()}")
-                        top_row = results_df.loc[top_key]
-                        cA, cB = st.columns(2)
-                        with cA:
-                            st.metric("Accuracy", f"{top_row['accuracy']*100:,.1f}%")
-                            st.metric("Recall", f"{top_row['recall']*100:,.1f}%")
-                        with cB:
-                            st.metric("Precision", f"{top_row['precision']*100:,.1f}%")
-                            st.metric("F1 Score", f"{top_row['f1']*100:,.1f}%")
-                        if not pd.isna(top_row.get("roc_auc", np.nan)):
-                            st.metric("ROC AUC", f"{top_row['roc_auc']*100:,.1f}%")
+                        if not results_df.empty:
+                            top_key = results_df.index[0]
+                            st.subheader(f"🏅 Best Model: {top_key.replace('-', ' ').title()}")
+                            top_row = results_df.loc[top_key]
+                            cA, cB = st.columns(2)
+                            with cA:
+                                st.metric("Accuracy", f"{top_row['accuracy']*100:,.1f}%")
+                                st.metric("Recall", f"{top_row['recall']*100:,.1f}%")
+                            with cB:
+                                st.metric("Precision", f"{top_row['precision']*100:,.1f}%")
+                                st.metric("F1 Score", f"{top_row['f1']*100:,.1f}%")
+                            if not pd.isna(top_row.get("roc_auc", np.nan)):
+                                st.metric("ROC AUC", f"{top_row['roc_auc']*100:,.1f}%")
 
                         with st.expander("🔍 Feature Schema"):
                             st.write({
