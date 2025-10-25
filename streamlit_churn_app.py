@@ -783,31 +783,27 @@ elif page == "🤖 Train Models":
         # ---- Train/Test Split 
         st.subheader("Train/Test Split")
         
-        st.markdown(
-            "Choose what **percentage of rows** to use for *training*. "
-            "**The remainder is used for testing.** "
-            "_Tip: **50** means 50% train / 50% test; **90** means 90% train / 10% test._"
-        )
-
-        # Single slider (Streamlit's red bar). No extra custom bar.
         train_pct = st.slider(
-            "Training percentage (the rest is testing)",
-            min_value=50,  # lower bound shown as '50'
-            max_value=90,  # upper bound shown as '90'
+            "Training %",
+            min_value=50,
+            max_value=90,
             step=5,
             value=80,
-            help="Between 50% and 90% of the data for training; the remainder is used for testing."
+            label_visibility="collapsed",  # keep UI clean
+            help="This sets the TRAIN split. Example: 50 → 50% train / 50% test; 90 → 90% train / 10% test."
         )
         test_pct = 100 - train_pct
-        test_size = test_pct / 100.0  # <-- keep using this below in train_test_split
-
-        # Left/right labels below the slider
+        test_size = test_pct / 100.0  # use in train_test_split
+        
         c_left, c_right = st.columns(2)
         with c_left:
             st.markdown(f"**Training: {train_pct}%**")
         with c_right:
-            st.markdown(f"<div style='text-align:right'><strong>Testing: {test_pct}%</strong></div>",
-                        unsafe_allow_html=True)
+            st.markdown(
+                f"<div style='text-align:right'><strong>Testing: {test_pct}%</strong></div>",
+                unsafe_allow_html=True
+            )
+        
 
         st.subheader("📉 Dataset Sampling")
         sample_option = st.radio(
