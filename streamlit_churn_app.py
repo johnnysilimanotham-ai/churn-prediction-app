@@ -779,10 +779,45 @@ elif page == "🤖 Train Models":
         )
         
         balance_classes = st.checkbox("Handle class imbalance (recommended)", value=True)
-        
-        # Training % slider (placed BELOW model selection)
-        train_pct = st.slider("Training %", min_value=50, max_value=90, step=5, value=80)
-        test_size = 1 - (train_pct / 100)
+
+        # ---- Train/Test Split (pretty UI) ----
+        st.subheader("Train/Test Split")
+        # Slider (hide label text; we draw our own labels)
+        train_pct = st.slider("Training %", min_value=50, max_value=90, step=5, value=80,
+                              label_visibility="collapsed")
+        test_pct = 100 - train_pct
+        test_size = test_pct / 100.0  # used later for train_test_split
+
+        # Top labels: left training, right testing
+        lc, rc = st.columns([1, 1])
+        with lc:
+            st.markdown(f"**Training: {train_pct}%**")
+        with rc:
+            st.markdown(
+                f"<div style='text-align:right'><strong>Testing: {test_pct}%</strong></div>",
+                unsafe_allow_html=True
+            )
+
+        # Visual split bar
+        st.markdown(f"""
+        <div style="
+          width:100%;
+          height:18px;
+          background:#ECEFF4;
+          border-radius:9999px;
+          position:relative;
+          overflow:hidden;">
+          <div style="width:{train_pct}%;height:100%;background:#0B0B1A;"></div>
+          <div style="
+            position:absolute;left:{train_pct}%;top:50%;
+            transform:translate(-50%,-50%);
+            width:24px;height:24px;background:#FFFFFF;
+            border:2px solid #0B0B1A;border-radius:50%;
+            box-shadow:0 1px 3px rgba(0,0,0,0.15);
+          "></div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.caption(f"Using {train_pct}% for training and {test_pct}% for testing.")
 
         st.subheader("📉 Dataset Sampling")
         sample_option = st.radio(
@@ -810,22 +845,25 @@ elif page == "🤖 Train Models":
 
         st.caption(
             f"Final dataset for train/test: {len(df_to_use):,} rows • {df_to_use.shape[1]} columns • "
-            f"Test set: {int(test_size*100)}%"
+            f"Test set: {int(test_pct)}%"
         )
 
         # Map selection to estimators
         def make_estimator(key: str):
             if key == "random-forest":
                 return RandomForestClassifier(
-                n_estimators=300, max_depth=None, random_state=42, n_jobs=-1,
-                class_weight="balanced" if balance_classes else None
+                    n_estimators=300, max_depth=None, random_state=42, n_jobs=-1,
+                    class_weight="balanced" if balance_classes else None
                 )
             if key == "svm":
                 return SVC(kernel="rbf", probability=True, random_state=42,
-                   class_weight="balanced" if balance_classes else None)
+                           class_weight="balanced" if balance_classes else None)
             if key == "logistic-regression":
-                return LogisticRegression(max_iter=1000, solver="lbfgs",
-                    class_weight="balanced" if balance_classes else None)
+                return LogisticRegression(
+                    max_iter=1000, solver="lbfgs",
+                    class_weight="balanced" if balance_classes else None
+                )
+            raise ValueError(f"Unknown model '{key}'")
 
         # Start training
         if st.button("🚀 Start Training", type="primary", use_container_width=True):
