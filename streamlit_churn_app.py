@@ -780,7 +780,7 @@ elif page == "🤖 Train Models":
         
         balance_classes = st.checkbox("Handle class imbalance (recommended)", value=True)
 
-        # ================== DATASET SAMPLING (first) ==================
+        # ================== DATASET SAMPLING ==================
         st.subheader("📉 Dataset Sampling")
         sample_option = st.radio(
             "How much data to use:",
@@ -806,7 +806,7 @@ elif page == "🤖 Train Models":
         
         total_rows = len(df_to_use)
 
-# ================== TRAIN / TEST SPLIT (second) ==================
+# ================== TRAIN / TEST SPLIT ==================
         st.subheader("Train/Test Split")
         
         train_pct = st.slider(
@@ -816,7 +816,7 @@ elif page == "🤖 Train Models":
             step=5,
             value=80,
             label_visibility="visible",
-            help="This sets the TRAIN split. Example: 70 → 70% train / 30% test."
+            help="Pick the TRAIN percentage. Bounds 10–90 ensure each split gets at least 10%. "
         )
         test_pct = 100 - train_pct
         test_size = test_pct / 100.0
