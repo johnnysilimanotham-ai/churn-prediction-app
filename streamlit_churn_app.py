@@ -780,44 +780,34 @@ elif page == "🤖 Train Models":
         
         balance_classes = st.checkbox("Handle class imbalance (recommended)", value=True)
 
-        # ---- Train/Test Split (pretty UI) ----
+        # ---- Train/Test Split 
         st.subheader("Train/Test Split")
-        # Slider (hide label text; we draw our own labels)
-        train_pct = st.slider("Training %", min_value=50, max_value=90, step=5, value=80,
-                              label_visibility="collapsed")
+        
+        st.markdown(
+            "Choose what **percentage of rows** to use for *training*. "
+            "**The remainder is used for testing.** "
+            "_Tip: **50** means 50% train / 50% test; **90** means 90% train / 10% test._"
+        )
+
+        # Single slider (Streamlit's red bar). No extra custom bar.
+        train_pct = st.slider(
+            "Training percentage (the rest is testing)",
+            min_value=50,  # lower bound shown as '50'
+            max_value=90,  # upper bound shown as '90'
+            step=5,
+            value=80,
+            help="Between 50% and 90% of the data for training; the remainder is used for testing."
+        )
         test_pct = 100 - train_pct
-        test_size = test_pct / 100.0  # used later for train_test_split
+        test_size = test_pct / 100.0  # <-- keep using this below in train_test_split
 
-        # Top labels: left training, right testing
-        lc, rc = st.columns([1, 1])
-        with lc:
+        # Left/right labels below the slider
+        c_left, c_right = st.columns(2)
+        with c_left:
             st.markdown(f"**Training: {train_pct}%**")
-        with rc:
-            st.markdown(
-                f"<div style='text-align:right'><strong>Testing: {test_pct}%</strong></div>",
-                unsafe_allow_html=True
-            )
-
-        # Visual split bar
-        st.markdown(f"""
-        <div style="
-          width:100%;
-          height:18px;
-          background:#ECEFF4;
-          border-radius:9999px;
-          position:relative;
-          overflow:hidden;">
-          <div style="width:{train_pct}%;height:100%;background:#0B0B1A;"></div>
-          <div style="
-            position:absolute;left:{train_pct}%;top:50%;
-            transform:translate(-50%,-50%);
-            width:24px;height:24px;background:#FFFFFF;
-            border:2px solid #0B0B1A;border-radius:50%;
-            box-shadow:0 1px 3px rgba(0,0,0,0.15);
-          "></div>
-        </div>
-        """, unsafe_allow_html=True)
-        st.caption(f"Using {train_pct}% for training and {test_pct}% for testing.")
+        with c_right:
+            st.markdown(f"<div style='text-align:right'><strong>Testing: {test_pct}%</strong></div>",
+                        unsafe_allow_html=True)
 
         st.subheader("📉 Dataset Sampling")
         sample_option = st.radio(
