@@ -780,39 +780,14 @@ elif page == "🤖 Train Models":
         
         balance_classes = st.checkbox("Handle class imbalance (recommended)", value=True)
 
-        # ---- Train/Test Split 
-        st.subheader("Train/Test Split")
-        
-        train_pct = st.slider(
-            "Training %",
-            min_value=50,
-            max_value=90,
-            step=5,
-            value=80,
-            label_visibility="visible",
-            help="Between 50% and 90% of the data for training; the remainder is used for testing."
-        )
-        test_pct = 100 - train_pct
-        test_size = test_pct / 100.0  # use in train_test_split
-        
-        c_left, c_right = st.columns(2)
-        with c_left:
-            st.markdown(f"**Training: {train_pct}%**")
-        with c_right:
-            st.markdown(
-                f"<div style='text-align:right'><strong>Testing: {test_pct}%</strong></div>",
-                unsafe_allow_html=True
-            )
-        
-
+        # ================== DATASET SAMPLING (first) ==================
         st.subheader("📉 Dataset Sampling")
         sample_option = st.radio(
             "How much data to use:",
             ["Use all data", "Use a percentage", "Use a fixed number of rows"],
             index=0
         )
-
-        # Sampling control
+        
         df_to_use = df_clean
         if sample_option == "Use a percentage":
             perc = st.slider("Percentage of dataset to use", 10, 100, 100, step=10)
@@ -828,10 +803,39 @@ elif page == "🤖 Train Models":
             if n_rows < max_rows:
                 df_to_use = df_clean.sample(n=int(n_rows), random_state=42)
             st.caption(f"Using {len(df_to_use):,} rows out of {len(df_clean):,}")
+        
+        total_rows = len(df_to_use)
 
+# ================== TRAIN / TEST SPLIT (second) ==================
+        st.subheader("Train/Test Split")
+        
+        train_pct = st.slider(
+            "\u00A0",  # blank label so ? tooltip shows
+            min_value=10,
+            max_value=90,
+            step=5,
+            value=80,
+            label_visibility="visible",
+            help="This sets the TRAIN split. Example: 70 → 70% train / 30% test."
+        )
+        test_pct = 100 - train_pct
+        test_size = test_pct / 100.0
+        
+        train_rows = int(round(total_rows * (train_pct / 100.0)))
+        test_rows = total_rows - train_rows
+        
+        c_left, c_right = st.columns(2)
+        with c_left:
+            st.markdown(f"**Training: {train_pct}% ({train_rows:,} rows)**")
+        with c_right:
+            st.markdown(
+                f"<div style='text-align:right'><strong>Testing: {test_pct}% ({test_rows:,} rows)</strong></div>",
+                unsafe_allow_html=True
+            )
+        
         st.caption(
-            f"Final dataset for train/test: {len(df_to_use):,} rows • {df_to_use.shape[1]} columns • "
-            f"Test set: {int(test_pct)}%"
+            f"Final dataset: {total_rows:,} rows • {df_to_use.shape[1]} columns • "
+            f"Split → Train: {train_pct}% ({train_rows:,}), Test: {test_pct}% ({test_rows:,})"
         )
 
         # Map selection to estimators
