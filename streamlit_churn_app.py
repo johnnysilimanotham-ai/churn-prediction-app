@@ -790,7 +790,7 @@ elif page == "🤖 Train Models":
             step=5,
             value=80,
             label_visibility="visible",
-            help="This sets the TRAIN split. Example: 50 → 50% train / 50% test; 90 → 90% train / 10% test."
+            help="Between 50% and 90% of the data for training; the remainder is used for testing."
         )
         test_pct = 100 - train_pct
         test_size = test_pct / 100.0  # use in train_test_split
