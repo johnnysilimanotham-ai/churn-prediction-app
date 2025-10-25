@@ -789,7 +789,7 @@ elif page == "🤖 Train Models":
             max_value=90,
             step=5,
             value=80,
-            label_visibility="collapsed",  # keep UI clean
+            label_visibility="visible",
             help="This sets the TRAIN split. Example: 50 → 50% train / 50% test; 90 → 90% train / 10% test."
         )
         test_pct = 100 - train_pct
