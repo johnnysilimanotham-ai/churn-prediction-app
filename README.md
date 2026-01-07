@@ -120,7 +120,7 @@ Single Customer: Input manually, see churn probability, risk level, and feature 
 
 Batch Prediction: Upload CSV to generate churn probabilities and risk classifications; download results as CSV
 
-Implemented Enhancements (Appendix B)
+Implemented Enhancements
 
 Upload Tab Enhancements
 
