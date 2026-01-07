@@ -10,7 +10,7 @@ Dataset
 
 Source: Simulated bank customer dataset
 
-Records: ~5,000 customers
+Records: 5,000 customers
 
 Features: Age, Gender, Account Balance, Number of Products, Credit Score, Tenure, Geography, etc.
 
@@ -26,7 +26,7 @@ System Setup
 
 Platform & Environment:
 
-Python 3.9+
+Python
 
 Streamlit framework for web interface
 
@@ -38,20 +38,6 @@ Application File:
 
 streamlit_churn_app.py contains the full code for UI, preprocessing, modeling, evaluation, and predictions.
 
-Run the App:
-
-Primary Access (Live App): Streamlit Link
-
-GitHub Repository: GitHub Link
-
-Streamlit Cloud Instructions:
-
-Log in to Streamlit Cloud
- with GitHub
-
-Connect repository johnnysilimanotham-ai/beta2.0
-
-Click “New App” → Streamlit Cloud installs dependencies and launches the app
 
 Features & Functionality
 1. Upload Data
